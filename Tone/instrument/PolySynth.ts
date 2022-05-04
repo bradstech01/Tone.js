@@ -21,13 +21,13 @@ type OmitMonophonicOptions<T> = Omit<T, "context" | "onsilence">;
 
 type VoiceOptions<T> =
 	T extends MembraneSynth ? MembraneSynthOptions :
-		T extends MetalSynth ? MetalSynthOptions :
-			T extends FMSynth ? FMSynthOptions :
-				T extends MonoSynth ? MonoSynthOptions :
-					T extends AMSynth ? AMSynthOptions :
-						T extends Synth ? SynthOptions :
-							T extends Monophonic<infer U> ? U :
-								never;
+	T extends MetalSynth ? MetalSynthOptions :
+	T extends FMSynth ? FMSynthOptions :
+	T extends MonoSynth ? MonoSynthOptions :
+	T extends AMSynth ? AMSynthOptions :
+	T extends Synth ? SynthOptions :
+	T extends Monophonic<infer U> ? U :
+	never;
 
 /**
  * The settable synth options. excludes monophonic options.
@@ -181,7 +181,26 @@ export class PolySynth<Voice extends Monophonic<any> = Synth> extends Instrument
 			this._voices.push(voice);
 			return voice;
 		} else {
+			//otherwise release the oldest active voice, set it to dispose when silent (avoids click noise), and make a new one to replace it
 			warn("Max polyphony exceeded. Note dropped.");
+			const oldestActive = this._activeVoices.shift();
+			const oldestVoice = oldestActive?.voice;
+			if (oldestVoice) {
+				oldestVoice.onsilence = () => {
+					oldestVoice.dispose();
+				};
+				oldestVoice.triggerRelease(oldestVoice.now());
+				const index = this._voices.indexOf(oldestVoice);
+				this._voices.splice(index, 1)
+				const voice = new this.voice(Object.assign(this.options, {
+					context: this.context,
+					onsilence: this._makeVoiceAvailable.bind(this),
+				}));
+				assert(voice instanceof Monophonic, "Voice must extend Monophonic class");
+				voice.connect(this.output);
+				this._voices.push(voice);
+				return voice;
+			}
 		}
 	}
 
@@ -353,7 +372,7 @@ export class PolySynth<Voice extends Monophonic<any> = Synth> extends Instrument
 	/**
 	 * The release which is scheduled to the timeline. 
 	 */
-	 protected _syncedRelease = (time: number) => this.releaseAll(time);
+	protected _syncedRelease = (time: number) => this.releaseAll(time);
 
 	/**
 	 * Set a member/attribute of the voices
@@ -392,7 +411,7 @@ export class PolySynth<Voice extends Monophonic<any> = Synth> extends Instrument
 		});
 		return this;
 	}
-	
+
 	dispose(): this {
 		super.dispose();
 		this._dummyVoice.dispose();
